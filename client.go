@@ -174,7 +174,7 @@ func Dial(network, address string, opts ...*Option) (client *Client, err error) 
 	if err != nil {
 		return nil, err
 	}
-	// 返回时 client 为空，把已连接的资源释放
+	// return 语句之后，函数返回之前执行，如果这时 client 为空，则把已连接的资源释放
 	defer func() {
 		if client == nil {
 			_ = conn.Close()
@@ -183,7 +183,7 @@ func Dial(network, address string, opts ...*Option) (client *Client, err error) 
 	return NewClient(conn, opt)
 }
 
-// send 实现发送请求的能力
+// send 实现发送请求的功能
 func (client *Client) send(call *Call) {
 	client.sending.Lock()
 	defer client.sending.Unlock()
