@@ -6,12 +6,13 @@
 package rpc
 
 import (
-	"encoding/json"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -20,13 +21,14 @@ import (
 	"github.com/bz-2021/simple-rpc/codec"
 )
 
+// 区分是 RPC 协议
 const MagicNumber = 0x1A2B3C4D
 
 type Option struct {
 	MagicNumber    int
 	CodecType      codec.Type
-	ConnectTimeout time.Duration
-	HandleTimeout  time.Duration
+	ConnectTimeout time.Duration // Dial 时设置的超时时长
+	HandleTimeout  time.Duration // 执行函数时的超时时长
 }
 
 var DefaultOption = &Option{
@@ -97,10 +99,16 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 		_ = conn.Close()
 	}()
 	var opt Option
-	if err := json.NewDecoder(conn).Decode(&opt); err != nil {
+	
+	if err := gob.NewDecoder(conn).Decode(&opt); err != nil {
 		log.Println("rpc server: options error:", err)
 		return
 	}
+
+	// if err := json.NewDecoder(conn).Decode(&opt); err != nil {
+	// 	log.Println("rpc server: options error:", err)
+	// 	return
+	// }
 	if opt.MagicNumber != MagicNumber {
 		log.Printf("rpc server: invaild magic number %x", opt.MagicNumber)
 		return
@@ -193,8 +201,8 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 
 	called := make(chan struct{})
 	sent := make(chan struct{})
-
-	var finish = make(chan struct{})
+	finish := make(chan struct{})
+	
 	defer close(finish)
 
 	go func() {
@@ -230,4 +238,38 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 	case <-called:
 		<-sent
 	}
+}
+
+const (
+	connected        = "200 Connected to RPC"
+	defaultRPCPath   = "/_rpc_"
+	defaultDebugPath = "/debug/rpc"
+)
+
+// 实现 http.Handler 方法进行 RPC 应答
+func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/plain; charest=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	// 直接处理 HTTP 底层连接
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	_, _ = io.WriteString(conn, "HTTP/1.0 " + connected + "\n\n")
+	server.ServeConn(conn)
+}
+
+func (server *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, server)
+	http.Handle(defaultDebugPath, debugHTTP{server})
+	log.Println("rpc server debug path:", defaultDebugPath)
+}
+
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
 }

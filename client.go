@@ -1,13 +1,16 @@
 package rpc
 
 import (
+	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,11 +135,23 @@ func NewClient(conn net.Conn, opt *Option) (*Client, error) {
 		log.Println("rpc client: codec error:", err)
 		return nil, err
 	}
-	if err := json.NewEncoder(conn).Encode(opt); err != nil {
+
+	buf := bufio.NewWriter(conn)
+	// defer func() {
+	// 	_ = buf.Flush()
+	// }()
+	if err := gob.NewEncoder(buf).Encode(opt); err != nil {
 		log.Panicln("rpc client: opions error:", err)
 		_ = conn.Close()
 		return nil, err
 	}
+	_ = buf.Flush()
+	// 原先使用 Json 对 Option 进行编码会导致粘包的问题
+	// if err := json.NewEncoder(conn).Encode(opt); err != nil {
+	// 	log.Panicln("rpc client: opions error:", err)
+	// 	_ = conn.Close()
+	// 	return nil, err
+	// }
 	return newClientCodec(f(conn), opt), nil
 }
 
@@ -186,9 +201,6 @@ func parseOptions(opts ...*Option) (*Option, error) {
 
 // send 实现发送请求的功能
 func (client *Client) send(call *Call) {
-	client.sending.Lock()
-	defer client.sending.Unlock()
-
 	seq, err := client.registerCall(call)
 	if err != nil {
 		call.Error = err
@@ -224,6 +236,9 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 		Reply:         reply,
 		Done:          done,
 	}
+	client.sending.Lock()
+	defer client.sending.Unlock()
+	
 	client.send(call)
 	return call
 }
@@ -247,7 +262,7 @@ type clientResult struct {
 
 type newClientFunc func(conn net.Conn, opt *Option) (client *Client, err error)
 
-func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
+func dialTimeout(newClientFunction newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
@@ -261,9 +276,9 @@ func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (cli
 			_ = conn.Close()
 		}
 	}()
-	ch := make(chan clientResult, 0)
+	ch := make(chan clientResult, 1)
 	go func() {
-		client, err := f(conn, opt)
+		client, err := newClientFunction(conn, opt)
 		ch <- clientResult{client: client, err: err}
 	}()
 	if opt.ConnectTimeout == 0 {
@@ -281,4 +296,38 @@ func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (cli
 // Dial 在特定地址和端口与 RPC 服务器建立连接
 func Dial(network, address string, opts ...*Option) (*Client, error) {
 	return dialTimeout(NewClient, network, address, opts...)
+}
+
+func NewHTTPClient(conn net.Conn, opt *Option) (*Client, error) {
+	_, _ = io.WriteString(conn, fmt.Sprintf("CONNECT %s HTTP/1.0\n\n", defaultRPCPath))
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
+	if err == nil && resp.Status == connected {
+		return NewClient(conn, opt)
+	}
+	if err == nil {
+		err = errors.New("unexpected HTTP response: " + resp.Status)
+	}
+	return nil, err
+}
+
+func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
+	return dialTimeout(NewHTTPClient, network, address, opts...)
+}
+
+// XDial 通过地址解析（http@10.0.0.1:8000）调用不同的函数与 RPC 服务器进行连接
+func XDial(rpcAddr string, opts ...*Option) (*Client, error) {
+	parts := strings.Split(rpcAddr, "@")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("rpc client err: wrong format '%s', expect protocal@addr", rpcAddr)
+	}
+	protocol, addr := parts[0], parts[1]
+	switch protocol {
+	case "http":
+		return DialHTTP("tcp", addr, opts...)
+	default:
+		// tcp, unix or other transport protocol
+		return Dial(protocol, addr, opts...)
+	}
+
 }

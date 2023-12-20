@@ -68,6 +68,7 @@ func newService(rcvr interface{}) *service {
 func (s *service) registerMethods() {
 	s.method = make(map[string]*methodType)
 	for i := 0; i < s.typ.NumMethod(); i++ {
+		// Method(int) 返回 exported method
 		method := s.typ.Method(i)
 		mType := method.Type
 		// 第 0 个是自身，第 2、3 个是 arg 和 reply，返回值是 error
@@ -103,3 +104,4 @@ func (s *service) call(m *methodType, argv, replyv reflect.Value) error {
 	}
 	return nil
 }
+
