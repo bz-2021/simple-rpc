@@ -1,3 +1,8 @@
+/*
+ * @Author: bz2021
+ * @Date: 2023-12-19 17:31:42
+ * @Description:
+ */
 package xclient
 
 import (
@@ -8,7 +13,7 @@ import (
 	rpc "github.com/bz-2021/simple-rpc"
 )
 
-// XClient 支持负载均衡和客户端
+// XClient 支持负载均衡的客户端
 type XClient struct {
 	d       Discovery
 	mode    SelectMode
