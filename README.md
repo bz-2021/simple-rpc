@@ -8,6 +8,8 @@
 - 注册中心，
 - 服务发现， -->
 
+![流程](./docs/process.png)
+
 ![UML](./docs/uml.png)
 
 # 遇到的问题和解决方法
@@ -84,7 +86,7 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 }
 ```
 
-解决方法是再通过一个通过来通知协程关闭
+解决方法是再通过一个通道来通知协程关闭
 
 ``` Go
 finish := make(chan struct{})
