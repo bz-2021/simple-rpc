@@ -17,11 +17,6 @@ func (f Foo) Sum(arg Args, reply *int) error {
 	return nil
 }
 
-func (f Foo) sum(arg Args, reply *int) error {
-	*reply = arg.Num1 + arg.Num2
-	return nil
-}
-
 func _assert(condition bool, msg string, v ...interface{}) {
 	if !condition {
 		panic(fmt.Sprintf("assertion failed: "+msg, v...))

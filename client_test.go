@@ -50,6 +50,15 @@ func startServer(addr chan string) {
 	Accept(l)
 }
 
+func startFooServer(addr chan string) {
+	var f Foo
+	_ = Register(&f)
+	// pick a free port
+	l, _ := net.Listen("tcp", ":0")
+	addr <- l.Addr().String()
+	Accept(l)
+}
+
 func TestClient_Call(t *testing.T) {
 	t.Parallel()
 	addrCh := make(chan string)
@@ -91,4 +100,24 @@ func TestXDial(t *testing.T) {
 		_, err := XDial("unix@" + addr)
 		_assert(err == nil, "failed to connect unix socket")
 	}
+}
+
+func BenchmarkClient(b *testing.B) {
+	addrCh := make(chan string)
+	go startFooServer(addrCh)
+	addr := <-addrCh
+	time.Sleep(time.Second)
+
+	client, _ := Dial("tcp", addr)
+	defer client.Close()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			var reply int
+			if err := client.Call(context.Background(), "Foo.Sum", Args{Num1: 1, Num2: 2}, &reply); err != nil {
+				b.Errorf("Call failed: %v", err)
+			}
+		}
+	})
 }
